@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IVIRASON Order Tracker</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Load React and ReactDOM (MUST be loaded first) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Load Babel for JSX compilation in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* Custom font import for better aesthetics */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fdf2f8; /* Pink-50 */
+        }
+
+        /* Custom Scrollbar Styling (for product breakdown) */
+        .custom-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background-color: #F9A8D4; /* Pink-300 */
+            border-radius: 4px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #FCE7F3; /* Pink-100 */
+        }
+
+        /* Keyframe animations */
+        @keyframes fade-in {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fade-in {
+            animation: fade-in 0.2s ease-out forwards;
+        }
+        @keyframes bounce-in {
+            0% { opacity: 0; transform: translateY(100%); }
+            60% { opacity: 1; transform: translateY(-5px); }
+            100% { transform: translateY(0); }
+        }
+        .animate-bounce-in {
+            animation: bounce-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Chick SVG Animations */
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+        @keyframes blink {
+            0%, 10%, 100% { transform: scaleY(1); }
+            5%, 15% { transform: scaleY(0.1); }
+        }
+        .chick-body { animation: bounce 1.5s infinite ease-in-out; transform-origin: bottom; }
+        .chick-eye { animation: blink 3s infinite; transform-origin: center; }
+    </style>
+</head>
+<body>
+    <!-- The root element where the React app will be injected -->
+    <div id="root">
+        <div class="flex items-center justify-center min-h-screen bg-pink-50">
+            <svg class="w-10 h-10 animate-spin text-pink-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <p class="ml-3 text-pink-500 text-lg">Hatching your adorable tracker...</p>
+        </div>
+    </div>
+
+    <!-- 1. Load Firebase Modular SDKs and map functions to global scope (type="module" is key) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+
+        // IMPORTANT: Set debug logging for Firestore
+        setLogLevel('Debug');
+
+        // Expose Firebase modular functions globally for the Babel script to use.
+        window.initializeApp = initializeApp;
+        window.getAuth = getAuth;
+        window.signInAnonymously = signInAnonymously;
+        window.signInWithCustomToken = signInWithCustomToken;
+        window.onAuthStateChanged = onAuthStateChanged;
+        
+        window.getFirestore = getFirestore;
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.onSnapshot = onSnapshot;
+        window.deleteDoc = deleteDoc;
+        window.doc = doc;
+        window.updateDoc = updateDoc;
+        window.query = query;
+
+        // --- USER-PROVIDED CONFIGURATION ---
+        const userAppId = 'ivirasonordertracker'; // Used for Firestore path artifact ID
+        const userFirebaseConfig = JSON.stringify({
+            apiKey: "AIzaSyDPonUGRM8vY3Tj_4-2xM2-UKaALAdjdbE",
+            authDomain: "ivirasonordertracker.firebaseapp.com",
+            projectId: "ivirasonordertracker",
+            storageBucket: "ivirasonordertracker.firebasestorage.app",
+            messagingSenderId: "352378033246",
+            appId: "1:352378033246:web:919df28d28f019d9a0d0cf",
+            measurementId: "G-6EE96SP262"
+        });
+        // --- END USER-PROVIDED CONFIGURATION ---
+
+        // Define global variables required by the component, using fallbacks to the user's config
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : userAppId;
+        window.firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : JSON.parse(userFirebaseConfig);
+        window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+    </script>
+    
+    <!-- 2. Use the text/babel script type to allow in-browser JSX compilation -->
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback, memo } = React;
+        const { createRoot } = ReactDOM;
+
+        // --- ICON DEFINITIONS (Replaces Lucide-React) ---
+        // We define the necessary icons here as functional React components using inline SVG.
+        const SVGIcon = ({ children, ...props }) => (
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                {...props}
+            >
+                {children}
+            </svg>
+        );
+
+        const Package = (props) => (
+            <SVGIcon {...props}>
+                <path d="m7.5 4.275 9 5.148 5.75-3.32v6.64l-5.75 3.32-9-5.148z" />
+                <path d="M12 2v20" />
+                <path d="M12 12l10 5.75-10 5.75-10-5.75z" />
+                <path d="M2 17.75l10-5.75 10-5.75" />
+            </SVGIcon>
+        );
+        const DollarSign = (props) => (
+            <SVGIcon {...props}>
+                <line x1="12" y1="1" x2="12" y2="23" />
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </SVGIcon>
+        );
+        const Calendar = (props) => (
+            <SVGIcon {...props}>
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+            </SVGIcon>
+        );
+        const Feather = (props) => (
+            <SVGIcon {...props}>
+                <path d="M20.25 15.75l-7.5-7.5-5 5v5l5-5 7.5 7.5 5-5z" />
+                <path d="M15 14l-5 5" />
+                <path d="M10 10l5 5" />
+            </SVGIcon>
+        );
+        const PlusCircle = (props) => (
+            <SVGIcon {...props}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="16" />
+                <line x1="8" y1="12" x2="16" y2="12" />
+            </SVGIcon>
+        );
+        const Trash2 = (props) => (
+            <SVGIcon {...props}>
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+            </SVGIcon>
+        );
+        const Loader = (props) => (
+            <SVGIcon {...props}>
+                <line x1="12" y1="2" x2="12" y2="6" />
+                <line x1="12" y1="18" x2="12" y2="22" />
+                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                <line x1="2" y1="12" x2="6" y2="12" />
+                <line x1="18" y1="12" x2="22" y2="12" />
+                <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+            </SVGIcon>
+        );
+        const List = (props) => (
+            <SVGIcon {...props}>
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+            </SVGIcon>
+        );
+        const CheckCircle = (props) => (
+            <SVGIcon {...props}>
+                <path d="M22 11.08V12a10 10 0 1 1-5.69-8.91" />
+                <path d="M22 4L12 14.01 9 11.01" />
+            </SVGIcon>
+        );
+        const Clock = (props) => (
+            <SVGIcon {...props}>
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+            </SVGIcon>
+        );
+        const XCircle = (props) => (
+            <SVGIcon {...props}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="15" y1="9" x2="9" y2="15" />
+                <line x1="9" y1="9" x2="15" y2="15" />
+            </SVGIcon>
+        );
+        const Users = (props) => (
+            <SVGIcon {...props}>
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </SVGIcon>
+        );
+        const User = (props) => (
+            <SVGIcon {...props}>
+                <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+            </SVGIcon>
+        );
+        const TrendingUp = (props) => (
+            <SVGIcon {...props}>
+                <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+                <polyline points="18 7 22 7 22 11" />
+            </SVGIcon>
+        );
+        const Search = (props) => (
+            <SVGIcon {...props}>
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </SVGIcon>
+        );
+        const Edit = (props) => (
+            <SVGIcon {...props}>
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+            </SVGIcon>
+        );
+        const Save = (props) => (
+            <SVGIcon {...props}>
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+            </SVGIcon>
+        );
+        const X = (props) => (
+            <SVGIcon {...props}>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+            </SVGIcon>
+        );
+        const ShoppingBag = (props) => (
+            <SVGIcon {...props}>
+                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <path d="M16 10a4 4 0 0 1-8 0" />
+            </SVGIcon>
+        );
+        const AlertTriangle = (props) => (
+            <SVGIcon {...props}>
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+            </SVGIcon>
+        );
+        const ChevronDown = (props) => (
+            <SVGIcon {...props}>
+                <polyline points="6 9 12 15 18 9" />
+            </SVGIcon>
+        );
+        // --- END ICON DEFINITIONS ---
+        
+        // Status colors and icons mapping
+        const statusMap = {
+          Paid: { color: 'text-green-700 bg-green-100', icon: CheckCircle, border: 'border-green-500' },
+          Pending: { color: 'text-yellow-700 bg-yellow-100', icon: Clock, border: 'border-yellow-500' },
+          Cancelled: { color: 'text-red-700 bg-red-100', icon: XCircle, border: 'border-red-500' },
+          Withdrawn: { color: 'text-slate-700 bg-slate-200', icon: XCircle, border: 'border-slate-500' }, 
+        };
+
+        // --- Notification Component ---
+        const Notification = memo(({ message, type, onClose }) => {
+            const isSuccess = type === 'success';
+            const bgColor = isSuccess ? 'bg-green-500' : 'bg-red-500';
+            const Icon = isSuccess ? CheckCircle : AlertTriangle;
+
+            useEffect(() => {
+                const timer = setTimeout(onClose, 4000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            return (
+                <div className={`fixed bottom-5 right-5 p-4 rounded-xl shadow-2xl text-white font-semibold transition-transform duration-300 transform translate-x-0 ${bgColor} flex items-center z-50 animate-bounce-in`}>
+                    <Icon className="w-5 h-5 mr-2" />
+                    <span>{message}</span>
+                    <button onClick={onClose} className="ml-4 opacity-70 hover:opacity-100 transition">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            );
+        });
+        Notification.displayName = 'Notification';
+
+        // Animated Chubby Chick SVG Component
+        const AnimatedChubbyChick = memo(({ className = 'w-10 h-10' }) => (
+          <svg className={`${className} inline-block`} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            {/* The animation styles are defined in the main <style> tag in the HTML head */}
+            {/* Body (Yellow) */}
+            <circle cx="50" cy="65" r="40" fill="#FACC15" className="chick-body shadow-md"/>
+            {/* Head (Slightly lighter yellow) */}
+            <circle cx="50" cy="35" r="30" fill="#FDE047" className="chick-body"/>
+            {/* Eyes (Black - Blinking) */}
+            <g className="chick-body">
+              <rect x="35" y="30" width="5" height="5" fill="#000" rx="1" className="chick-eye"/>
+              <rect x="60" y="30" width="5" height="5" fill="#000" rx="1" className="chick-eye"/>
+            </g>
+            {/* Beak (Orange) */}
+            <path d="M50 45 L55 55 L45 55 Z" fill="#F97316" className="chick-body"/>
+            {/* Feet (Orange) */}
+            <path d="M40 90 L35 95 L45 95 Z" fill="#F97316" className="chick-body"/>
+            <path d="M60 90 L55 95 L65 95 Z" fill="#F97316" className="chick-body"/>
+          </svg>
+        ));
+        AnimatedChubbyChick.displayName = 'AnimatedChubbyChick';
+
+        // --- Component Definition (New Order Tab) ---
+        // ADDED isReady PROP
+        const NewOrderTab = memo(({ input, handleInputChange, handleAddOrder, isReady }) => {
+            const paymentOptions = ['Pending', 'Paid', 'Cancelled', 'Withdrawn'];
+
+            return (
+                <div className="p-6 bg-pink-200/50 rounded-3xl shadow-2xl border-4 border-pink-400 animate-fade-in">
+                    <h2 className="text-2xl font-bold text-pink-700 mb-6 flex items-center">
+                        <PlusCircle className="w-6 h-6 mr-2 text-pink-500" /> Record a New Order
+                    </h2>
+                    <form onSubmit={handleAddOrder} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                        
+                        {/* Customer Name -> Customer / Channel */}
+                        <div className="xl:col-span-2">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><User className="w-4 h-4 mr-1" /> Customer / Channel</label>
+                        <input
+                            type="text"
+                            name="customerName"
+                            value={input.customerName}
+                            onChange={handleInputChange}
+                            placeholder="e.g., Tiktok, Shopee, Jane Doe"
+                            list="channel-options" 
+                            required
+                            className="w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                        />
+                        <datalist id="channel-options">
+                            <option value="Tiktok" />
+                            <option value="Shopee" />
+                            <option value="Lazada" />
+                            <option value="Facebook" />
+                            <option value="Instagram" />
+                            <option value="Walk-in" />
+                        </datalist>
+                        </div>
+                        
+                        {/* Product Name */}
+                        <div className="lg:col-span-1">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><Package className="w-4 h-4 mr-1" /> Product</label>
+                        <input
+                            type="text"
+                            name="productName"
+                            value={input.productName}
+                            onChange={handleInputChange}
+                            placeholder="e.g., Fluffy Pouch"
+                            required
+                            className="w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                        />
+                        </div>
+
+                        {/* Design Name */}
+                        <div className="lg:col-span-1">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><Feather className="w-4 h-4 mr-1" /> Design</label>
+                        <input
+                            type="text"
+                            name="designName"
+                            value={input.designName}
+                            onChange={handleInputChange}
+                            placeholder="e.g., Happy Chick Face"
+                            required
+                            className="w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                        />
+                        </div>
+
+                        {/* Revenue */}
+                        <div className="lg:col-span-1">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><DollarSign className="w-4 h-4 mr-1" /> Revenue (₱)</label>
+                        <input
+                            type="number"
+                            name="revenue"
+                            value={input.revenue}
+                            onChange={handleInputChange}
+                            placeholder="1200.00"
+                            step="0.01"
+                            min="0"
+                            required
+                            className="w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                        />
+                        </div>
+
+                        {/* COGS */}
+                        <div className="lg:col-span-1">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><DollarSign className="w-4 h-4 mr-1" /> COGS (₱)</label>
+                        <input
+                            type="number"
+                            name="costOfGoodsSold"
+                            value={input.costOfGoodsSold}
+                            onChange={handleInputChange}
+                            placeholder="300.00"
+                            step="0.01"
+                            min="0"
+                            required
+                            className="w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                        />
+                        </div>
+
+                        {/* Date */}
+                        <div className="lg:col-span-1">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><Calendar className="w-4 h-4 mr-1" /> Date</label>
+                        <input
+                            type="date"
+                            name="date"
+                            value={input.date}
+                            onChange={handleInputChange}
+                            required
+                            className="w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                        />
+                        </div>
+
+                        {/* Payment Status */}
+                        <div className="lg:col-span-1">
+                        <label className="text-pink-600 font-semibold flex items-center mb-1 text-sm"><Clock className="w-4 h-4 mr-1" /> Payment Status</label>
+                        <div className="relative">
+                            <select
+                                name="paymentStatus"
+                                value={input.paymentStatus}
+                                onChange={handleInputChange}
+                                className="appearance-none w-full p-3 rounded-xl border-2 border-pink-300 bg-yellow-50 text-gray-700 focus:ring-yellow-400 focus:border-yellow-400 transition"
+                            >
+                                {paymentOptions.map(status => (
+                                    <option key={status} value={status}>{status}</option>
+                                ))}
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-pink-500 pointer-events-none" />
+                        </div>
+                        </div>
+                        
+                        {/* Submit Button - DISABLED IF NOT READY */}
+                        <div className="sm:col-span-2 lg:col-span-3 xl:col-span-2 pt-4">
+                        <button
+                            type="submit"
+                            disabled={!isReady} 
+                            className="w-full p-3 bg-pink-500 text-white font-bold rounded-2xl shadow-lg hover:bg-pink-600 transition duration-200 transform hover:scale-[1.01] active:scale-[0.99] border-b-4 border-pink-700 disabled:bg-pink-300 disabled:cursor-not-allowed disabled:shadow-none"
+                        >
+                            <span className="flex items-center justify-center text-xl">
+                            {isReady ? 'Add New IVIRASON Sale' : 'Connecting to Nest...'} <AnimatedChubbyChick className='w-6 h-6 ml-2'/>
+                            </span>
+                        </button>
+                        </div>
+                    </form>
+                </div>
+            );
+        });
+        NewOrderTab.displayName = 'NewOrderTab';
+
+        // --- Confirmation Modal Component ---
+        const ConfirmationModal = memo(({ isOpen, title, message, onConfirm, onCancel }) => {
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl transform transition-all border-4 border-pink-500 scale-100 animate-fade-in">
+                        <h3 className="text-2xl font-bold text-red-600 mb-4 flex items-center">
+                            <Trash2 className="w-6 h-6 mr-2" /> {title}
+                        </h3>
+                        <p className="text-gray-700 mb-8">{message}</p>
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                onClick={onCancel}
+                                className="px-4 py-2 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition duration-150 shadow-md"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={onConfirm}
+                                className="px-4 py-2 bg-red-500 text-white font-semibold rounded-xl shadow-lg hover:bg-red-600 transition duration-150"
+                            >
+                                Delete Permanently
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        });
+        ConfirmationModal.displayName = 'ConfirmationModal';
+
+        // --- History Tab Component ---
+        const HistoryTab = memo(({ 
+            searchTerm, setSearchTerm, statusFilter, setStatusFilter, 
+            customerFilter, setCustomerFilter, uniqueCustomers, orders,
+            filteredOrders, editingId, handleStartEdit, handleStartDelete,
+            handleUpdateStatus, isEditing, editFormData, handleEditChange,
+            handleSaveEdit, handleCancelEdit, statusMap,
+        }) => {
+            return (
+                <div className="space-y-6 animate-fade-in">
+              
+                    {/* Search/Filter Bar */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        
+                        {/* Search Input */}
+                        <div className="p-3 bg-yellow-100/70 rounded-xl shadow-inner border-2 border-yellow-300 flex items-center col-span-1 md:col-span-2">
+                            <Search className="w-5 h-5 text-pink-600 mr-3" />
+                            <input
+                            type="text"
+                            placeholder="Filter by Channel, Customer, Product..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full p-1 bg-transparent text-gray-700 placeholder-pink-400 focus:outline-none"
+                            />
+                        </div>
+
+                        {/* Customer Filter Dropdown */}
+                        <div className="relative">
+                            <select
+                                value={customerFilter}
+                                onChange={(e) => setCustomerFilter(e.target.value)}
+                                className="appearance-none w-full p-3 bg-pink-50 text-gray-700 font-semibold rounded-xl border-2 border-pink-300 shadow-md transition hover:bg-pink-100"
+                            >
+                                {uniqueCustomers.map(customer => (
+                                    <option key={customer} value={customer}>
+                                        {customer === 'All' ? 'All Channels/Customers' : customer}
+                                    </option>
+                                ))}
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-pink-500 pointer-events-none" />
+                        </div>
+                    </div>
+                    
+                    {/* Status Filter Buttons */}
+                    <div className="flex flex-wrap gap-2 mb-4 p-3 bg-pink-100 rounded-2xl border border-pink-300 shadow-inner">
+                        <span className="text-pink-700 font-bold mr-2 hidden sm:block">Filter Status:</span>
+                        {['All', ...Object.keys(statusMap)].map(status => {
+                            const count = status === 'All' 
+                                ? orders.length 
+                                : orders.filter(o => o.paymentStatus === status).length;
+                            
+                            return (
+                                <button
+                                    key={status}
+                                    onClick={() => setStatusFilter(status)}
+                                    className={`
+                                        px-4 py-1.5 rounded-full font-bold text-sm transition-all duration-200 shadow-md
+                                        flex items-center
+                                        ${statusFilter === status 
+                                            ? 'bg-pink-600 text-white border-b-4 border-pink-800 transform scale-[1.02]' 
+                                            : 'bg-white text-gray-700 hover:bg-yellow-50 border border-gray-300'
+                                        }
+                                    `}
+                                >
+                                    {status} <span className="ml-1 font-extrabold">({count})</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <h2 className="text-2xl font-bold text-pink-700 flex items-center">
+                        <List className="w-6 h-6 mr-2" /> Order History ({filteredOrders.length} filtered)
+                    </h2>
+                    
+                    {filteredOrders.length === 0 ? (
+                        <div className="p-8 text-center bg-yellow-50 rounded-2xl shadow-inner border-2 border-yellow-300 text-gray-600">
+                            <p className="text-lg font-medium">
+                                {searchTerm || statusFilter !== 'All' || customerFilter !== 'All'
+                                    ? `No IVIRASON orders found matching the current filters.` 
+                                    : `No IVIRASON orders recorded yet! Go back to the "New Order" tab to add one.`}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                        {filteredOrders.map((order) => {
+                            const isEditing = editingId === order.id;
+                            const statusInfo = statusMap[isEditing ? editFormData.paymentStatus : order.paymentStatus] || statusMap.Pending;
+                            const profitColor = order.profit >= 0 ? 'text-green-700' : 'text-red-600';
+                            
+                            return (
+                                <div key={order.id} className={`p-4 bg-white rounded-3xl shadow-xl flex flex-col transition duration-150 border-l-8 ${statusInfo.border} ${isEditing ? 'ring-4 ring-pink-300' : 'hover:shadow-2xl'}`}>
+                                
+                                {/* STATIC VIEW (Non-editing mode) */}
+                                {!isEditing && (
+                                    <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center w-full">
+                                    {/* Order Details (Left Section) */}
+                                    <div className="flex-grow space-y-1 mb-3 lg:mb-0 lg:w-1/3">
+                                        <p className="text-sm text-gray-500 font-medium flex items-center">
+                                        <Calendar className="w-4 h-4 mr-1 text-pink-400" /> {order.date}
+                                        </p>
+                                        <p className="text-lg font-extrabold text-pink-700 flex items-center">
+                                        <Package className="w-5 h-5 mr-2 text-yellow-500" /> {order.productName}
+                                        </p>
+                                        <p className="text-sm text-gray-600 ml-7">
+                                        <span className="font-semibold text-pink-500">Channel/Customer:</span> {order.customerName}
+                                        </p>
+                                    </div>
+
+                                    {/* Financial Summary (Center Section) */}
+                                    <div className="grid grid-cols-3 gap-3 lg:w-1/3 text-center mb-3 lg:mb-0">
+                                        <div className="p-2 bg-gray-100 rounded-xl shadow-inner border border-gray-200">
+                                            <p className="text-xs text-pink-500 font-semibold">Revenue</p>
+                                            <p className="text-md font-bold text-pink-800">₱{order.revenue.toFixed(2)}</p>
+                                        </div>
+                                        <div className="p-2 bg-gray-100 rounded-xl shadow-inner border border-gray-200">
+                                            <p className="text-xs text-pink-500 font-semibold">COGS</p>
+                                            <p className="text-md font-bold text-gray-700">₱{order.costOfGoodsSold.toFixed(2)}</p>
+                                        </div>
+                                        <div className={`p-2 rounded-xl border ${order.profit >= 0 ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-400'}`}>
+                                            <p className="text-xs text-pink-500 font-semibold">Profit</p>
+                                            <p className={`text-md font-extrabold ${profitColor}`}>₱{order.profit.toFixed(2)}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Actions (Right Section) */}
+                                    <div className="flex items-center space-x-2 mt-3 lg:mt-0">
+                                        {/* Status Dropdown */}
+                                        <div className="relative">
+                                        <select
+                                            value={order.paymentStatus}
+                                            onChange={(e) => handleUpdateStatus(order.id, e.target.value)}
+                                            className={`appearance-none p-2 rounded-xl font-semibold border-2 ${statusInfo.color} focus:ring-yellow-400 focus:border-yellow-400`}
+                                        >
+                                            {Object.keys(statusMap).map(status => (
+                                                <option key={status} value={status}>{status}</option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-pink-500 pointer-events-none" />
+                                        </div>
+                                        
+                                        {/* Edit Button */}
+                                        <button
+                                        onClick={() => handleStartEdit(order)}
+                                        className="p-3 bg-pink-100 rounded-full text-pink-500 hover:text-pink-700 hover:bg-pink-200 transition duration-150 transform hover:scale-110 active:scale-90 shadow-md"
+                                        aria-label={`Edit order ${order.productName}`}
+                                        >
+                                        <Edit className="w-5 h-5" />
+                                        </button>
+                                        
+                                        {/* Delete Button (Calls the new modal trigger) */}
+                                        <button
+                                        onClick={() => handleStartDelete(order)}
+                                        className="p-3 bg-red-100 rounded-full text-red-400 hover:text-red-600 hover:bg-red-200 transition duration-150 transform hover:scale-110 active:scale-90 shadow-md"
+                                        aria-label={`Delete order ${order.productName}`}
+                                        >
+                                        <Trash2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                    </div>
+                                )}
+                                
+                                {/* EDITING VIEW (Editing mode) */}
+                                {isEditing && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 w-full p-2 bg-pink-50 rounded-2xl border border-pink-200">
+                                        
+                                        <div className="lg:col-span-2">
+                                        <label className="text-xs text-pink-600 font-semibold">Customer / Channel</label>
+                                        <input type="text" name="customerName" value={editFormData.customerName} onChange={handleEditChange} required className="w-full p-2 border rounded-xl bg-yellow-50 focus:border-pink-500" />
+                                        </div>
+                                        
+                                        <div className="lg:col-span-1">
+                                        <label className="text-xs text-pink-600 font-semibold">Product</label>
+                                        <input type="text" name="productName" value={editFormData.productName} onChange={handleEditChange} required className="w-full p-2 border rounded-xl bg-yellow-50 focus:border-pink-500" />
+                                        </div>
+
+                                        <div className="lg:col-span-1">
+                                        <label className="text-xs text-pink-600 font-semibold">Design</label>
+                                        <input type="text" name="designName" value={editFormData.designName} onChange={handleEditChange} required className="w-full p-2 border rounded-xl bg-yellow-50 focus:border-pink-500" />
+                                        </div>
+                                        
+                                        <div className="lg:col-span-1">
+                                        <label className="text-xs text-pink-600 font-semibold">Revenue (₱)</label>
+                                        <input type="number" name="revenue" value={editFormData.revenue} onChange={handleEditChange} required step="0.01" min="0" className="w-full p-2 border rounded-xl bg-yellow-50 focus:border-pink-500" />
+                                        </div>
+
+                                        <div className="lg:col-span-1">
+                                        <label className="text-xs text-pink-600 font-semibold">COGS (₱)</label>
+                                        <input type="number" name="costOfGoodsSold" value={editFormData.costOfGoodsSold} onChange={handleEditChange} required step="0.01" min="0" className="w-full p-2 border rounded-xl bg-yellow-50 focus:border-pink-500" />
+                                        </div>
+
+                                        <div className="lg:col-span-2">
+                                        <label className="text-xs text-pink-600 font-semibold">Date</label>
+                                        <input type="date" name="date" value={editFormData.date} onChange={handleEditChange} required className="w-full p-2 border rounded-xl bg-yellow-50 focus:border-pink-500" />
+                                        </div>
+                                        
+                                        <div className="lg:col-span-2 relative">
+                                        <label className="text-xs text-pink-600 font-semibold">Status</label>
+                                        <select name="paymentStatus" value={editFormData.paymentStatus} onChange={handleEditChange} className={`appearance-none w-full p-2 rounded-xl border-2 font-semibold ${statusInfo.color} focus:ring-yellow-400 focus:border-yellow-400`}>
+                                            {Object.keys(statusMap).map(status => (
+                                                <option key={status} value={status}>{status}</option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-3 top-[55%] transform -translate-y-1/2 w-4 h-4 text-pink-500 pointer-events-none" />
+                                        </div>
+
+                                        {/* Save/Cancel Actions */}
+                                        <div className="lg:col-span-2 flex space-x-2 pt-4">
+                                            <button
+                                                onClick={() => handleSaveEdit(order.id)}
+                                                className="flex-1 p-2 bg-green-500 text-white font-bold rounded-xl shadow-lg hover:bg-green-600 transition duration-150 transform hover:scale-[1.01] active:scale-[0.99] border-b-2 border-green-700"
+                                            >
+                                                <Save className="w-4 h-4 inline mr-1" /> Save
+                                            </button>
+                                            <button
+                                                onClick={handleCancelEdit}
+                                                className="flex-1 p-2 bg-slate-300 text-slate-800 font-bold rounded-xl shadow-lg hover:bg-slate-400 transition duration-150 transform hover:scale-[1.01] active:scale-[0.99] border-b-2 border-slate-500"
+                                            >
+                                                <X className="w-4 h-4 inline mr-1" /> Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                </div>
+                            );
+                        })}
+                        </div>
+                    )}
+                </div>
+            );
+        });
+        HistoryTab.displayName = 'HistoryTab';
+        // --- END History Tab Component ---
+
+        // --- Main App Component ---
+        const App = () => {
+          // Use global variables defined in the script block above
+          const [appId] = useState(window.appId);
+          const [firebaseConfig] = useState(window.firebaseConfig);
+          const [initialAuthToken] = useState(window.initialAuthToken);
+          // Get Firebase functions from global scope
+          const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, query } = window;
+
+
+          const [orders, setOrders] = useState([]);
+          const [db, setDb] = useState(null);
+          const [auth, setAuth] = useState(null);
+          const [userIdState, setUserIdState] = useState(null);
+          const [isAuthReady, setIsAuthReady] = useState(false); // Key state for readiness
+          const [loading, setLoading] = useState(true);
+          const [activeTab, setActiveTab] = useState('newOrder'); 
+          const [searchTerm, setSearchTerm] = useState(''); 
+          const [statusFilter, setStatusFilter] = useState('All'); 
+          const [customerFilter, setCustomerFilter] = useState('All'); 
+          
+          // Edit State
+          const [editingId, setEditingId] = useState(null);
+          const [editFormData, setEditFormData] = useState({});
+
+          // Confirmation Modal State
+          const [orderToDelete, setOrderToDelete] = useState(null); 
+          
+          // Notification State
+          const [notification, setNotification] = useState(null);
+
+          const closeNotification = useCallback(() => setNotification(null), []);
+
+          const [input, setInput] = useState(() => ({
+            date: new Date().toISOString().substring(0, 10),
+            customerName: '', 
+            productName: '',
+            designName: '',
+            revenue: '',
+            costOfGoodsSold: '', 
+            paymentStatus: 'Pending', 
+          }));
+
+          // 1. Firebase Initialization and Authentication
+          useEffect(() => {
+            // Check if Firebase functions are available
+            if (typeof initializeApp === 'undefined') {
+                console.error("Firebase modular functions not available on window. Check type='module' script loading.");
+                setLoading(false);
+                return;
+            }
+
+            if (Object.keys(firebaseConfig).length === 0) {
+              console.error("Firebase config is missing. Data persistence will not work.");
+              setLoading(false);
+              return;
+            }
+
+            try {
+              const app = initializeApp(firebaseConfig);
+              const firestore = getFirestore(app);
+              const userAuth = getAuth(app);
+              
+              setDb(firestore);
+              setAuth(userAuth);
+
+              const unsubscribe = onAuthStateChanged(userAuth, async (user) => {
+                if (!user) {
+                  try {
+                    if (initialAuthToken) {
+                      await signInWithCustomToken(userAuth, initialAuthToken);
+                    } else {
+                      await signInAnonymously(userAuth);
+                    }
+                  } catch (e) {
+                    console.error("Auth sign-in failed:", e);
+                    // Fallback to anonymous sign-in if custom token fails
+                    await signInAnonymously(userAuth);
+                  }
+                }
+                const currentUserId = userAuth.currentUser?.uid || (typeof crypto !== 'undefined' ? crypto.randomUUID() : 'fallback-id');
+                setUserIdState(currentUserId);
+                setIsAuthReady(true); // SET READY FLAG AFTER USER ID IS ESTABLISHED
+                setLoading(false);
+              });
+
+              return () => unsubscribe();
+            } catch (error) {
+              console.error("Firebase initialization failed:", error);
+              setLoading(false);
+            }
+          }, [firebaseConfig, initialAuthToken]); // Rerun if config changes (though usually static)
+
+          // 2. Real-time Data Listener (onSnapshot)
+          useEffect(() => {
+            // ONLY proceed if authentication is ready and DB/User is set
+            if (!isAuthReady || !db || !userIdState || typeof collection === 'undefined') return;
+
+            const ordersCollectionPath = `artifacts/${appId}/users/${userIdState}/chibi_orders`;
+            const ordersCollectionRef = collection(db, ordersCollectionPath);
+            const q = query(ordersCollectionRef);
+
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+              const fetchedOrders = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                // Ensure numeric fields are correctly parsed or defaulted
+                revenue: parseFloat(doc.data().revenue) || 0,
+                costOfGoodsSold: parseFloat(doc.data().costOfGoodsSold) || 0,
+              }));
+              // Sort by date (newest first)
+              fetchedOrders.sort((a, b) => new Date(b.date) - new Date(a.date));
+              setOrders(fetchedOrders);
+            }, (error) => {
+              console.error("Error fetching orders:", error);
+            });
+
+            return () => unsubscribe();
+          }, [isAuthReady, db, userIdState, appId, collection, query, onSnapshot]);
+
+          // Handle Input Changes for New Order
+          const handleInputChange = (e) => {
+            const { name, value } = e.target;
+            setInput(prev => ({ ...prev, [name]: value }));
+          };
+          
+          // Handle Input Changes for Editing
+          const handleEditChange = (e) => {
+            const { name, value } = e.target;
+            setEditFormData(prev => ({ ...prev, [name]: value }));
+          };
+
+          // Start Edit Mode
+          const handleStartEdit = (order) => {
+            setEditingId(order.id);
+            setEditFormData({
+                customerName: order.customerName,
+                productName: order.productName,
+                designName: order.designName,
+                revenue: order.revenue.toFixed(2), 
+                costOfGoodsSold: order.costOfGoodsSold.toFixed(2), 
+                paymentStatus: order.paymentStatus,
+                date: order.date,
+            });
+          };
+
+          // Cancel Edit Mode
+          const handleCancelEdit = () => {
+            setEditingId(null);
+            setEditFormData({});
+          };
+
+          // Save Edited Order
+          const handleSaveEdit = async (id) => {
+            if (!db || !userIdState || typeof doc === 'undefined') return;
+
+            const revenueValue = parseFloat(editFormData.revenue);
+            const cogsValue = parseFloat(editFormData.costOfGoodsSold);
+
+            if (!editFormData.productName || !editFormData.customerName || 
+                isNaN(revenueValue) || revenueValue < 0 || 
+                isNaN(cogsValue) || cogsValue < 0) {
+              setNotification({ message: 'Invalid data. Please check Revenue/COGS.', type: 'error' });
+              return;
+            }
+
+            try {
+                const docRef = doc(db, `artifacts/${appId}/users/${userIdState}/chibi_orders`, id);
+                await updateDoc(docRef, {
+                    customerName: editFormData.customerName.trim(),
+                    productName: editFormData.productName.trim(),
+                    designName: editFormData.designName.trim(),
+                    revenue: revenueValue,
+                    costOfGoodsSold: cogsValue,
+                    paymentStatus: editFormData.paymentStatus,
+                    date: editFormData.date,
+                });
+                setEditingId(null);
+                setEditFormData({});
+                setNotification({ message: 'Order updated successfully!', type: 'success' });
+            } catch (error) {
+                console.error("Error updating document: ", error);
+                setNotification({ message: 'Failed to update order.', type: 'error' });
+            }
+          };
+
+
+          // Add New Order
+          const handleAddOrder = async (e) => {
+            e.preventDefault();
+            // This is the check that was failing, now prevented by disabled button
+            if (!db || !userIdState || typeof addDoc === 'undefined') {
+              console.error("Database or User not ready.");
+              setNotification({ message: 'App not ready. Try again.', type: 'error' });
+              return;
+            }
+
+            // Basic validation
+            const revenueValue = parseFloat(input.revenue);
+            const cogsValue = parseFloat(input.costOfGoodsSold);
+
+            if (!input.productName || !input.designName || !input.customerName || 
+                isNaN(revenueValue) || revenueValue < 0 || 
+                isNaN(cogsValue) || cogsValue < 0) {
+              setNotification({ message: 'Oops! Please fill all fields correctly.', type: 'error' });
+              return;
+            }
+
+            const newOrder = {
+              date: input.date,
+              customerName: input.customerName.trim(),
+              productName: input.productName.trim(),
+              designName: input.designName.trim(),
+              revenue: revenueValue,
+              costOfGoodsSold: cogsValue,
+              paymentStatus: input.paymentStatus,
+              timestamp: new Date().toISOString(),
+            };
+
+            try {
+              const ordersCollectionRef = collection(db, `artifacts/${appId}/users/${userIdState}/chibi_orders`);
+              await addDoc(ordersCollectionRef, newOrder);
+              
+              // Clear input fields
+              setInput(prev => ({
+                ...prev,
+                customerName: '',
+                productName: '',
+                designName: '',
+                revenue: '',
+                costOfGoodsSold: '',
+              }));
+              setNotification({ message: 'Order added successfully! 💖', type: 'success' });
+              setActiveTab('history'); // UX improvement: switch to history after adding
+            } catch (error) {
+              console.error("Error adding document: ", error);
+              setNotification({ message: 'Failed to add order.', type: 'error' });
+            }
+          };
+          
+          // Delete Workflow - Trigger Modal
+          const handleStartDelete = (order) => {
+            setOrderToDelete(order);
+          };
+          
+          // Delete Workflow - Execute Deletion (Used by Modal)
+          const handleConfirmDelete = async () => {
+            if (!db || !userIdState || !orderToDelete || typeof deleteDoc === 'undefined') return;
+
+            try {
+                const docRef = doc(db, `artifacts/${appId}/users/${userIdState}/chibi_orders`, orderToDelete.id);
+                await deleteDoc(docRef);
+                setNotification({ message: `Deleted order for ${orderToDelete.customerName}.`, type: 'error' });
+            } catch (error) {
+                console.error("Error deleting document: ", error);
+                setNotification({ message: 'Failed to delete order.', type: 'error' });
+            } finally {
+                setOrderToDelete(null); // Close the modal
+            }
+          };
+
+          // Update Payment Status (used by the dropdown outside of edit mode)
+          const handleUpdateStatus = async (id, newStatus) => {
+            if (!db || !userIdState || typeof doc === 'undefined') return;
+            try {
+              const docRef = doc(db, `artifacts/${appId}/users/${userIdState}/chibi_orders`, id);
+              await updateDoc(docRef, { paymentStatus: newStatus });
+            } catch (error) {
+              console.error("Error updating status: ", error);
+              setNotification({ message: 'Failed to update status.', type: 'error' });
+            }
+          };
+
+          // --- MEMOIZED CALCULATIONS ---
+
+          // Calculate unique customers for filtering
+          const uniqueCustomers = useMemo(() => {
+            const customers = new Set();
+            orders.forEach(order => {
+                if (order.customerName && order.customerName.trim()) {
+                    customers.add(order.customerName.trim());
+                }
+            });
+            return ['All', ...Array.from(customers).sort()];
+          }, [orders]);
+
+
+          const totalRevenue = useMemo(() => orders.reduce((sum, order) => sum + order.revenue, 0), [orders]);
+          
+          const totalProfit = useMemo(() => orders.reduce((sum, order) => sum + (order.revenue - order.costOfGoodsSold), 0), [orders]);
+          
+          const totalOrders = useMemo(() => orders.length, [orders]);
+          
+          // NEW METRIC: Pending Revenue
+          const pendingRevenue = useMemo(() => {
+            return orders
+              .filter(order => order.paymentStatus === 'Pending')
+              .reduce((sum, order) => sum + order.revenue, 0);
+          }, [orders]);
+
+          const currentMonthProfit = useMemo(() => {
+            const today = new Date();
+            const currentMonth = today.getMonth();
+            const currentYear = today.getFullYear();
+
+            return orders
+              .filter(order => {
+                const orderDate = new Date(order.date);
+                return orderDate.getMonth() === currentMonth && orderDate.getFullYear() === currentYear;
+              })
+              .reduce((sum, order) => sum + (order.revenue - order.costOfGoodsSold), 0);
+          }, [orders]);
+
+          // Product Breakdown
+          const sortedProductCounts = useMemo(() => {
+            const productsOrderCount = orders.reduce((acc, order) => {
+                const product = order.productName.trim() || 'Unknown Product';
+                acc[product] = (acc[product] || 0) + 1;
+                return acc;
+            }, {});
+            return Object.entries(productsOrderCount)
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => b.count - a.count);
+          }, [orders]);
+
+
+          // Filtered Orders List
+          const filteredOrders = useMemo(() => {
+            const term = searchTerm.toLowerCase();
+            
+            return orders
+              .map(order => ({
+                ...order,
+                profit: (order.revenue - order.costOfGoodsSold),
+              }))
+              .filter(order => {
+                // 1. Filter by Search Term
+                const matchesSearch = term === '' ||
+                  order.productName.toLowerCase().includes(term) ||
+                  order.designName.toLowerCase().includes(term) ||
+                  order.customerName.toLowerCase().includes(term);
+
+                // 2. Filter by Status
+                const matchesStatus = statusFilter === 'All' || order.paymentStatus === statusFilter;
+
+                // 3. Filter by Customer Name (NEW)
+                const matchesCustomer = customerFilter === 'All' || order.customerName.trim() === customerFilter;
+
+                return matchesSearch && matchesStatus && matchesCustomer;
+              });
+          }, [orders, searchTerm, statusFilter, customerFilter]);
+
+
+          // --- Combined Total Orders and Product Breakdown Component ---
+          const CombinedOrderSummaryCard = memo(() => (
+            <div className="lg:col-span-2 p-6 bg-pink-100 rounded-3xl shadow-xl border-4 border-pink-300 animate-fade-in">
+                <h2 className="text-xl font-bold text-pink-700 flex items-center mb-4 border-b border-pink-300 pb-2">
+                    <ShoppingBag className="w-6 h-6 mr-2 text-pink-500" /> Total Sales Summary
+                </h2>
+                
+                {/* Total Orders (Big Number) */}
+                <div className="mb-6 text-center bg-pink-50 p-4 rounded-xl shadow-inner border border-pink-200">
+                    <p className="text-sm font-medium text-pink-600 uppercase tracking-wider">
+                        Total Orders Recorded
+                    </p>
+                    <p className="text-5xl sm:text-6xl font-extrabold text-pink-700 mt-2">
+                        {totalOrders}
+                    </p>
+                </div>
+                
+                {/* Unique Products Breakdown */}
+                <div className="mb-3 flex justify-between">
+                    <h3 className="text-lg font-bold text-gray-700 flex items-center">
+                        <Package className="w-5 h-5 mr-1 text-yellow-500" /> Top Selling Items ({sortedProductCounts.length} unique)
+                    </h3>
+                    <span className="text-sm text-gray-500 font-medium">Qty.</span>
+                </div>
+
+                {/* Product List Container (Scrollable) */}
+                {/* Custom scrollbar class added here */}
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scroll">
+                    {sortedProductCounts.length === 0 ? (
+                        <p className="text-sm text-gray-500 p-2 text-center">No products recorded yet.</p>
+                    ) : (
+                        sortedProductCounts.map(({ name, count }) => (
+                            <div key={name} className="flex items-center justify-between p-2 bg-white hover:bg-yellow-50 rounded-xl transition duration-150 border border-pink-200 shadow-sm">
+                                <span className="text-gray-900 font-medium text-sm truncate">
+                                    {name}
+                                </span>
+                                <span className="text-lg font-extrabold text-pink-700 bg-pink-200 px-3 py-0.5 rounded-full min-w-[50px] text-center shadow-inner">
+                                    {count}
+                                </span>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+          ));
+          CombinedOrderSummaryCard.displayName = 'CombinedOrderSummaryCard';
+
+          // --- App Component Render ---
+          if (loading) {
+            return (
+              <div className="flex items-center justify-center min-h-screen bg-pink-50">
+                  <Loader className="w-10 h-10 animate-spin text-pink-500" />
+                  <p className="ml-3 text-pink-500 text-lg">Connecting to Nest...</p>
+              </div>
+            );
+          }
+
+          const isEditingAny = editingId !== null;
+          
+          return (
+            <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+              {/* Header and User ID */}
+              <header className="text-center mb-8">
+                <AnimatedChubbyChick className="w-20 h-20 mx-auto mb-2" />
+                <h1 className="text-4xl font-extrabold text-pink-800">IVIRASON Sales Tracker</h1>
+                <p className="text-sm text-gray-500 mt-1 flex items-center justify-center">
+                    <Users className="w-4 h-4 mr-1"/> Your User ID: <span className="font-mono text-pink-600 ml-1 select-all">{userIdState}</span>
+                </p>
+              </header>
+
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                {/* Total Revenue */}
+                <div className="p-4 bg-white rounded-2xl shadow-lg border-b-4 border-pink-500 text-center">
+                  <p className="text-sm font-medium text-gray-500">Total Revenue</p>
+                  <p className="text-2xl font-bold text-pink-700 mt-1">₱{totalRevenue.toFixed(2)}</p>
+                </div>
+                {/* Total Profit */}
+                <div className="p-4 bg-white rounded-2xl shadow-lg border-b-4 border-green-500 text-center">
+                  <p className="text-sm font-medium text-gray-500">Total Profit</p>
+                  <p className="text-2xl font-bold text-green-700 mt-1">₱{totalProfit.toFixed(2)}</p>
+                </div>
+                {/* Current Month Profit */}
+                <div className="p-4 bg-white rounded-2xl shadow-lg border-b-4 border-yellow-500 text-center">
+                  <p className="text-sm font-medium text-gray-500">Current Month Profit</p>
+                  <p className="text-2xl font-bold text-yellow-700 mt-1">₱{currentMonthProfit.toFixed(2)}</p>
+                </div>
+                {/* Pending Revenue */}
+                <div className="p-4 bg-white rounded-2xl shadow-lg border-b-4 border-red-400 text-center">
+                  <p className="text-sm font-medium text-gray-500">Pending Revenue</p>
+                  <p className="text-2xl font-bold text-red-600 mt-1">₱{pendingRevenue.toFixed(2)}</p>
+                </div>
+              </div>
+
+              {/* Main Content: New Order & Summary Card */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                  {activeTab === 'newOrder' && <NewOrderTab 
+                      input={input} 
+                      handleInputChange={handleInputChange} 
+                      handleAddOrder={handleAddOrder} 
+                      isReady={isAuthReady} 
+                  />}
+                  <CombinedOrderSummaryCard />
+              </div>
+
+              {/* Tabs for Navigation */}
+              <div className="flex space-x-4 mb-6 sticky top-0 bg-pink-50 pt-2 z-10 border-b border-pink-200">
+                <button
+                  onClick={() => setActiveTab('newOrder')}
+                  disabled={isEditingAny}
+                  className={`
+                    px-6 py-2 rounded-t-xl font-bold transition-all duration-300 flex items-center shadow-md
+                    ${activeTab === 'newOrder' 
+                      ? 'bg-pink-500 text-white border-b-4 border-pink-700 shadow-pink-400/50 transform scale-[1.02] -translate-y-0.5' // Lifted & Pink Cloud
+                      : 'bg-yellow-200 text-pink-700 hover:bg-yellow-300 scale-100' // Yellow Cloud
+                    }
+                  `}
+                >
+                  <PlusCircle className="w-5 h-5 mr-2" /> New Order
+                </button>
+                <button
+                  onClick={() => setActiveTab('history')}
+                  disabled={isEditingAny}
+                  className={`
+                    px-6 py-2 rounded-t-xl font-bold transition-all duration-300 flex items-center shadow-md
+                    ${activeTab === 'history' 
+                      ? 'bg-pink-500 text-white border-b-4 border-pink-700 shadow-pink-400/50 transform scale-[1.02] -translate-y-0.5' // Lifted & Pink Cloud
+                      : 'bg-yellow-200 text-pink-700 hover:bg-yellow-300 scale-100' // Yellow Cloud
+                    }
+                  `}
+                >
+                  <List className="w-5 h-5 mr-2" /> Order History
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              {activeTab === 'history' && (
+                <HistoryTab
+                    searchTerm={searchTerm} 
+                    setSearchTerm={setSearchTerm}
+                    statusFilter={statusFilter}
+                    setStatusFilter={setStatusFilter}
+                    customerFilter={customerFilter}
+                    setCustomerFilter={setCustomerFilter}
+                    uniqueCustomers={uniqueCustomers}
+                    orders={orders} // Pass raw orders for status filtering count
+                    filteredOrders={filteredOrders}
+                    editingId={editingId}
+                    handleStartEdit={handleStartEdit}
+                    handleStartDelete={handleStartDelete}
+                    handleUpdateStatus={handleUpdateStatus}
+                    isEditing={isEditingAny}
+                    editFormData={editFormData}
+                    handleEditChange={handleEditChange}
+                    handleSaveEdit={handleSaveEdit}
+                    handleCancelEdit={handleCancelEdit}
+                    statusMap={statusMap}
+                />
+              )}
+              
+              <footer className="mt-12 text-center text-pink-500 text-sm">
+                <p>Built with 💖 for your cute online business!</p>
+              </footer>
+              
+              {/* Notification & Modal */}
+              {notification && <Notification message={notification.message} type={notification.type} onClose={closeNotification} />}
+              <ConfirmationModal
+                isOpen={!!orderToDelete}
+                title="Confirm Deletion"
+                message={`Are you sure you want to permanently delete the order for "${orderToDelete?.customerName}"? This action cannot be undone.`}
+                onConfirm={handleConfirmDelete}
+                onCancel={() => setOrderToDelete(null)}
+              />
+            </div>
+          );
+        };
+
+        // Render the application
+        window.onload = () => {
+          const container = document.getElementById('root');
+          // Wait for the 'module' script to run and populate the window object
+          // A brief delay helps ensure the Firebase functions are available globally before React tries to use them.
+          setTimeout(() => {
+              const root = createRoot(container);
+              root.render(<App />);
+          }, 100);
+        };
+    </script>
+</body>
+</html>
